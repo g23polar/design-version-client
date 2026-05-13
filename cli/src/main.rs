@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use design_version_core as dsv;
 
-/// dsv — local design file snapshot tool (v1)
+/// dsv — local design file snapshot tool
 #[derive(Debug, Parser)]
 #[command(name = "dsv", about = "Local snapshot store for designer binary files")]
 struct Cli {
@@ -21,10 +21,10 @@ enum Command {
     /// Initialise a new dsv store
     Init,
 
-    /// Snapshot a file into the store
+    /// Snapshot a file or directory into the store
     Snapshot {
-        /// Path to the file to snapshot
-        file: PathBuf,
+        /// Path to a file or directory to snapshot
+        path: PathBuf,
 
         /// Optional human-readable label for this snapshot
         #[arg(long, short)]
@@ -32,25 +32,70 @@ enum Command {
     },
 
     /// List snapshots in the store
-    List,
+    List {
+        /// Filter by label substring
+        #[arg(long)]
+        label: Option<String>,
 
-    /// Restore a snapshot to a path
-    Restore {
-        /// Snapshot ID (from `dsv list`)
-        id: i64,
-
-        /// Destination path to write the restored file to
-        out: PathBuf,
+        /// Filter by file path substring
+        #[arg(long)]
+        file: Option<String>,
     },
 
-    /// Verify the integrity of a snapshot's blob
+    /// Restore a snapshot (or batch) to a path
+    Restore {
+        /// Snapshot ID (from `dsv list`). Omit if using --batch.
+        #[arg(required_unless_present = "batch")]
+        id: Option<i64>,
+
+        /// Destination path to write the restored file/directory to
+        out: PathBuf,
+
+        /// Restore all files in a batch (directory snapshot)
+        #[arg(long)]
+        batch: Option<String>,
+    },
+
+    /// Verify the integrity of snapshot blob(s)
     Verify {
-        /// Snapshot ID
-        id: i64,
+        /// Snapshot ID. Omit to verify all blobs.
+        id: Option<i64>,
+
+        /// Verify all blobs in a batch
+        #[arg(long)]
+        batch: Option<String>,
     },
 
     /// Garbage-collect orphaned blobs
-    Gc,
+    Gc {
+        /// Actually delete orphaned blobs (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Set or update a snapshot's label
+    Label {
+        /// Snapshot ID (omit if using --batch)
+        #[arg(required_unless_present = "batch")]
+        id: Option<i64>,
+
+        /// New label text
+        #[arg(required = true)]
+        new_label: String,
+
+        /// Apply label to all snapshots in a batch
+        #[arg(long)]
+        batch: Option<String>,
+    },
+
+    /// Compare two snapshots
+    Diff {
+        /// First snapshot ID
+        id1: i64,
+
+        /// Second snapshot ID
+        id2: i64,
+    },
 }
 
 fn main() -> Result<()> {
@@ -66,44 +111,77 @@ fn main() -> Result<()> {
             );
         }
 
-        Command::Snapshot { file, label } => {
-            let snap = dsv::snapshot(&cli.store, &file, label.as_deref())
-                .with_context(|| format!("Failed to snapshot {}", file.display()))?;
-            println!(
-                "Snapshot #{} — {} ({} bytes) hash={}",
-                snap.id,
-                snap.created_at,
-                snap.file_size,
-                &snap.blob_hash[..16]
-            );
-            if let Some(lbl) = &snap.label {
-                println!("  label: {lbl}");
+        Command::Snapshot { path, label } => {
+            if path.is_dir() {
+                let snaps = dsv::snapshot_dir(&cli.store, &path, label.as_deref())
+                    .with_context(|| format!("Failed to snapshot directory {}", path.display()))?;
+                let batch_id = snaps[0].batch_id.as_deref().unwrap_or("?");
+                println!("Snapshot {} file(s) — batch {batch_id}", snaps.len());
+                for snap in &snaps {
+                    println!(
+                        "  #{} {} ({}) hash={}",
+                        snap.id,
+                        snap.file_path,
+                        format_bytes(snap.file_size),
+                        &snap.blob_hash[..16]
+                    );
+                }
+                if let Some(lbl) = &label {
+                    println!("  label: {lbl}");
+                }
+            } else {
+                let snap = dsv::snapshot(&cli.store, &path, label.as_deref())
+                    .with_context(|| format!("Failed to snapshot {}", path.display()))?;
+                println!(
+                    "Snapshot #{} — {} ({}) hash={}",
+                    snap.id,
+                    snap.created_at,
+                    format_bytes(snap.file_size),
+                    &snap.blob_hash[..16]
+                );
+                if let Some(lbl) = &snap.label {
+                    println!("  label: {lbl}");
+                }
             }
         }
 
-        Command::List => {
-            let snaps = dsv::list(&cli.store)
-                .with_context(|| "Failed to list snapshots")?;
+        Command::List { label, file } => {
+            let snaps = if let Some(ref pat) = label {
+                dsv::list_by_label(&cli.store, pat).with_context(|| "Failed to list snapshots")?
+            } else if let Some(ref pat) = file {
+                dsv::list_by_file(&cli.store, pat).with_context(|| "Failed to list snapshots")?
+            } else {
+                dsv::list(&cli.store).with_context(|| "Failed to list snapshots")?
+            };
 
             if snaps.is_empty() {
-                println!("No snapshots yet. Run `dsv snapshot <file>` to capture one.");
+                println!("No snapshots found.");
                 return Ok(());
             }
 
             let total = dsv::total_logical_bytes(&cli.store).unwrap_or(0);
-            println!("{:<6} {:<28} {:<16} {:<12} {}", "ID", "Created", "Hash prefix", "Size", "Label");
-            println!("{}", "-".repeat(80));
+            println!(
+                "{:<6} {:<28} {:<16} {:<12} {:<14} Label",
+                "ID", "Created", "Hash prefix", "Size", "Batch"
+            );
+            println!("{}", "-".repeat(90));
             for snap in &snaps {
+                let batch_str = snap
+                    .batch_id
+                    .as_deref()
+                    .map(|b| &b[..8.min(b.len())])
+                    .unwrap_or("—");
                 println!(
-                    "{:<6} {:<28} {:<16} {:<12} {}",
+                    "{:<6} {:<28} {:<16} {:<12} {:<14} {}",
                     snap.id,
                     snap.created_at,
                     &snap.blob_hash[..16],
                     format_bytes(snap.file_size),
+                    batch_str,
                     snap.label.as_deref().unwrap_or("—")
                 );
             }
-            println!("{}", "-".repeat(80));
+            println!("{}", "-".repeat(90));
             println!(
                 "  {} snapshot(s) — {} logical total",
                 snaps.len(),
@@ -111,30 +189,160 @@ fn main() -> Result<()> {
             );
         }
 
-        Command::Restore { id, out } => {
-            dsv::restore(&cli.store, id, &out)
-                .with_context(|| format!("Failed to restore snapshot #{id} to {}", out.display()))?;
-            println!("Restored snapshot #{id} → {}", out.display());
-        }
-
-        Command::Verify { id } => {
-            dsv::verify(&cli.store, id)
-                .with_context(|| format!("Failed to verify snapshot #{id}"))?;
-            println!("Snapshot #{id}: OK");
-        }
-
-        Command::Gc => {
-            let deleted = dsv::gc(&cli.store)
-                .with_context(|| "GC failed")?;
-            if deleted == 0 {
-                println!("Nothing to collect.");
+        Command::Restore { id, out, batch } => {
+            if let Some(batch_id) = batch {
+                let count = dsv::restore_batch(&cli.store, &batch_id, &out)
+                    .with_context(|| format!("Failed to restore batch {batch_id}"))?;
+                println!(
+                    "Restored {count} file(s) from batch {batch_id} → {}",
+                    out.display()
+                );
             } else {
-                println!("Deleted {deleted} orphaned blob(s).");
+                let id = id.unwrap();
+                dsv::restore(&cli.store, id, &out).with_context(|| {
+                    format!("Failed to restore snapshot #{id} to {}", out.display())
+                })?;
+                println!("Restored snapshot #{id} → {}", out.display());
+            }
+        }
+
+        Command::Verify { id, batch } => {
+            if let Some(batch_id) = batch {
+                let report = dsv::verify_batch(&cli.store, &batch_id)
+                    .with_context(|| format!("Failed to verify batch {batch_id}"))?;
+                print_verify_report(&report);
+            } else if let Some(id) = id {
+                dsv::verify(&cli.store, id)
+                    .with_context(|| format!("Failed to verify snapshot #{id}"))?;
+                println!("Snapshot #{id}: OK");
+            } else {
+                let report =
+                    dsv::verify_all(&cli.store).with_context(|| "Failed to verify store")?;
+                print_verify_report(&report);
+            }
+        }
+
+        Command::Gc { confirm } => {
+            let report = dsv::gc(&cli.store, confirm).with_context(|| "GC failed")?;
+
+            if report.orphaned_count == 0 {
+                println!("Nothing to collect.");
+            } else if confirm {
+                println!(
+                    "Deleted {} orphaned blob(s) ({})",
+                    report.orphaned_count,
+                    format_bytes(report.orphaned_bytes)
+                );
+            } else {
+                println!(
+                    "Found {} orphaned blob(s) ({}).",
+                    report.orphaned_count,
+                    format_bytes(report.orphaned_bytes)
+                );
+                println!("Run `dsv gc --confirm` to delete them.");
+            }
+        }
+
+        Command::Label {
+            id,
+            new_label,
+            batch,
+        } => {
+            if let Some(batch_id) = batch {
+                let count = dsv::update_label_by_batch(&cli.store, &batch_id, &new_label)
+                    .with_context(|| format!("Failed to update label for batch {batch_id}"))?;
+                println!(
+                    "Updated label to \"{new_label}\" on {count} snapshot(s) in batch {batch_id}"
+                );
+            } else {
+                let id = id.unwrap();
+                dsv::update_label(&cli.store, id, &new_label)
+                    .with_context(|| format!("Failed to update label for snapshot #{id}"))?;
+                println!("Snapshot #{id}: label set to \"{new_label}\"");
+            }
+        }
+
+        Command::Diff { id1, id2 } => {
+            let report = dsv::diff(&cli.store, id1, id2)
+                .with_context(|| format!("Failed to diff snapshots #{id1} and #{id2}"))?;
+
+            println!("Comparing snapshot #{id1} vs #{id2}\n");
+
+            println!(
+                "{:<18} {:<36} {:<36}",
+                "",
+                format!("#{id1}"),
+                format!("#{id2}")
+            );
+            println!("{}", "-".repeat(90));
+            println!(
+                "{:<18} {:<36} {:<36}",
+                "File", report.left.file_path, report.right.file_path
+            );
+            println!(
+                "{:<18} {:<36} {:<36}",
+                "Size",
+                format_bytes(report.left.file_size),
+                format_bytes(report.right.file_size)
+            );
+            println!(
+                "{:<18} {:<36} {:<36}",
+                "Hash",
+                &report.left.blob_hash[..32],
+                &report.right.blob_hash[..32]
+            );
+            println!(
+                "{:<18} {:<36} {:<36}",
+                "Label",
+                report.left.label.as_deref().unwrap_or("—"),
+                report.right.label.as_deref().unwrap_or("—")
+            );
+            println!(
+                "{:<18} {:<36} {:<36}",
+                "Created", report.left.created_at, report.right.created_at
+            );
+            println!("{}", "-".repeat(90));
+
+            if report.same_content {
+                println!("Content: IDENTICAL");
+            } else {
+                let sign = if report.size_delta_bytes >= 0 {
+                    "+"
+                } else {
+                    ""
+                };
+                let pct = match report.size_delta_percent {
+                    Some(p) => format!("{sign}{p:.1}%"),
+                    None => "N/A".to_string(),
+                };
+                println!(
+                    "Content: DIFFERENT — {sign}{} ({pct})",
+                    format_bytes(report.size_delta_bytes.unsigned_abs())
+                );
             }
         }
     }
 
     Ok(())
+}
+
+fn print_verify_report(report: &dsv::VerifyReport) {
+    println!(
+        "Checked {} blob(s): {} OK, {} corrupt, {} missing",
+        report.checked,
+        report.ok,
+        report.corrupt.len(),
+        report.missing.len()
+    );
+    for h in &report.corrupt {
+        println!("  CORRUPT: {h}");
+    }
+    for h in &report.missing {
+        println!("  MISSING: {h}");
+    }
+    if report.corrupt.is_empty() && report.missing.is_empty() {
+        println!("All blobs OK.");
+    }
 }
 
 fn format_bytes(n: u64) -> String {

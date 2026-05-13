@@ -1,6 +1,6 @@
 # UML — design-version-client
 
-_Last updated: 2026-05-13 — Milestone 1 implemented; all 25 tests green_
+_Last updated: 2026-05-13 — Binary renamed dvc → dsv; default store dir .dsv; CONTEXT.md + plan.md removed from repo_
 
 ## Overview
 
@@ -8,7 +8,7 @@ _Last updated: 2026-05-13 — Milestone 1 implemented; all 25 tests green_
 
 ## Module map
 
-- `core/src/api.rs` — public entry points: `init`, `snapshot`, `list`, `restore`, `verify`, `gc`
+- `core/src/api.rs` — public entry points: `init`, `snapshot`, `list`, `restore`, `verify`, `gc`, `total_logical_bytes`
 - `core/src/cas.rs` — content-addressable object store: atomic blob write/read/delete, sweep_tmp
 - `core/src/hash.rs` — BLAKE3 streaming hasher, `HashWriter<W>` (tee-style single-pass hash+write)
 - `core/src/manifest.rs` — SQLite schema + CRUD for `projects` and `snapshots` tables
@@ -54,5 +54,6 @@ flowchart TD
 
 ## Last activity
 
+- `2026-05-13` — Renamed binary dvc → dsv (default store .dsv); removed CONTEXT.md + plan.md from repo. Files touched: `cli/Cargo.toml`, `cli/src/main.rs`, `README.md`, `.gitignore`, `docs/adr/0001-storage-layout.md`, `UML.md`, `UML.html`
 - `2026-05-13` — Milestone 1 complete: Cargo workspace, all core modules, CLI, 25 tests. Files touched: `Cargo.toml`, `core/**`, `cli/src/main.rs`, `core/tests/integration.rs`, `README.md`, `CONTEXT.md`, `docs/adr/0001-storage-layout.md`
 - `2026-05-13` — Project bootstrapped: scaffold, `CONTEXT.md`, `ADR-0001`, `UML.md` created

@@ -9,6 +9,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 hex = "0.4"
 thiserror = "1"
 uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

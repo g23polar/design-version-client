@@ -6,7 +6,7 @@ Save and restore any version of your `.psd`, `.psb`, `.3dm`, `.pdf`, `.png`, or 
 
 ## Status
 
-**Milestone 1 complete** — walking skeleton is implemented and all tests pass. See `plan.md` for the full roadmap.
+**Milestone 2 complete** — multi-file directory snapshots, label workflows, GC/verify improvements, diff, and CI.
 
 ## Quick start (CLI)
 
@@ -20,31 +20,38 @@ alias dsv=./target/release/dsv
 # 1. Initialise a store (creates .dsv/ in the current directory)
 dsv init
 
-# 2. Snapshot a file
+# 2. Snapshot a single file
 dsv snapshot ~/Desktop/logo_v3.psd --label "before client review"
-# Snapshot #1 — 2026-05-13T21:00:00Z (142.7 MiB) hash=ab3f1e2d...
 
-# 3. Make changes, then snapshot again
-dsv snapshot ~/Desktop/logo_v3.psd --label "after client review"
-# Snapshot #2 — 2026-05-13T21:05:00Z (143.1 MiB) hash=cd91aa44...
+# 3. Snapshot an entire directory (all files grouped as a batch)
+dsv snapshot ~/Desktop/project-assets/ --label "pre-handoff"
 
 # 4. List all snapshots
 dsv list
-# ID     Created                      Hash prefix      Size         Label
-# ──────────────────────────────────────────────────────────────────────────────
-# 1      2026-05-13T21:00:00Z         ab3f1e2d...      142.7 MiB    before client review
-# 2      2026-05-13T21:05:00Z         cd91aa44...      143.1 MiB    after client review
-# ──────────────────────────────────────────────────────────────────────────────
-#   2 snapshot(s) — 285.8 MiB logical total
 
-# 5. Restore an earlier version
+# 5. Filter by label or file name
+dsv list --label "review"
+dsv list --file "logo"
+
+# 6. Restore a single snapshot
 dsv restore 1 ~/Desktop/logo_v3_restored.psd
 
-# 6. Verify blob integrity
-dsv verify 1
+# 7. Restore a full batch (directory snapshot)
+dsv restore --batch <batch-id> ~/Desktop/restored-assets/
 
-# 7. Garbage-collect orphaned blobs (after manually deleting snapshot records)
-dsv gc
+# 8. Compare two snapshots
+dsv diff 1 2
+
+# 9. Update a snapshot's label
+dsv label 1 "approved-by-client"
+
+# 10. Verify blob integrity
+dsv verify         # verify all blobs
+dsv verify 1       # verify a single snapshot
+
+# 11. Garbage-collect orphaned blobs
+dsv gc             # dry-run: shows what would be deleted
+dsv gc --confirm   # actually delete orphaned blobs
 ```
 
 ### Custom store path
@@ -57,6 +64,21 @@ dsv --store /Volumes/ExternalSSD/design-snapshots init
 dsv --store /Volumes/ExternalSSD/design-snapshots snapshot big-file.psb
 ```
 
+## CLI Reference
+
+| Command | Description |
+|---|---|
+| `dsv init` | Initialise a new store |
+| `dsv snapshot <path> [--label TEXT]` | Snapshot a file or directory |
+| `dsv list [--label PAT] [--file PAT]` | List snapshots, optionally filtered |
+| `dsv restore <id> <out>` | Restore a single snapshot |
+| `dsv restore --batch <id> <out_dir>` | Restore all files in a batch |
+| `dsv diff <id1> <id2>` | Compare two snapshots (metadata + size delta) |
+| `dsv label <id> <text>` | Set/update a snapshot's label |
+| `dsv label --batch <id> <text>` | Label all snapshots in a batch |
+| `dsv verify [id] [--batch ID]` | Verify blob integrity (all, one, or batch) |
+| `dsv gc [--confirm]` | Garbage-collect orphaned blobs (dry-run by default) |
+
 ## Architecture
 
 See [`CONTEXT.md`](CONTEXT.md) for domain context and [`UML.md`](UML.md) for architecture diagrams.
@@ -68,22 +90,29 @@ Key decisions are in [`docs/adr/`](docs/adr/):
 ## Running the tests
 
 ```sh
-# Unit + integration tests (all fast)
+# Unit + integration tests (53 tests)
 cargo test
 
 # Property tests are included — proptest runs 100 cases by default
 
 # Large-file test (800 MB, needs a fast SSD)
 RUN_LARGE_FILE_TESTS=1 cargo test -- --ignored large_file_800mb_snapshot_restore
+
+# Lint
+cargo clippy -- -D warnings
+cargo fmt -- --check
 ```
 
 ## Roadmap
 
-See `plan.md` → Milestone 2 and 3 for planned work:
-- Multi-file / directory snapshots
-- Named labels first-class in CLI
-- `dsv gc` improvements
-- Cross-platform CI (macOS ✅, Windows ⬜, Linux ⬜)
-- Binary rename
+See `plan.md` for detailed planning.
+
+### Done
+- ✅ Milestone 1 — single-file snapshot/restore/verify/gc
+- ✅ Milestone 2 — multi-file snapshots, labels, GC/verify improvements, diff, CI
+
+### Future (Milestone 3+)
 - Chunked CAS for inter-version dedup
+- Watch mode / autosave
 - UI binding (Tauri / native plugin) — separate planning conversation
+- Cloud sync

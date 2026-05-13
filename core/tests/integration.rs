@@ -8,9 +8,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use design_version_core::{gc, init, list, restore, snapshot, verify, DvcError};
+use design_version_core::{
+    diff, gc, gc_dry_run, init, list, list_by_file, list_by_label, restore, restore_batch,
+    snapshot, snapshot_dir, update_label, verify, verify_all, DvcError,
+};
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// -- helpers ------------------------------------------------------------------
 
 fn make_store() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -20,21 +23,27 @@ fn make_store() -> tempfile::TempDir {
 
 fn write_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
     let p = dir.join(name);
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
     let mut f = fs::File::create(&p).unwrap();
     f.write_all(content).unwrap();
     p
 }
 
-// ── small-file round-trip ────────────────────────────────────────────────────
+// -- small-file round-trip ----------------------------------------------------
 
 #[test]
 fn small_file_snapshot_restore_byte_identical() {
     let store = make_store();
     let files = tempfile::tempdir().unwrap();
 
-    // 10 KB of pseudo-random-ish bytes.
     let original: Vec<u8> = (0u64..10 * 1024)
-        .map(|i| (i.wrapping_mul(6364136223846793005u64).wrapping_add(1442695040888963407u64) & 0xFF) as u8)
+        .map(|i| {
+            (i.wrapping_mul(6364136223846793005u64)
+                .wrapping_add(1442695040888963407u64)
+                & 0xFF) as u8
+        })
         .collect();
 
     let src = write_file(files.path(), "design.psd", &original);
@@ -44,10 +53,13 @@ fn small_file_snapshot_restore_byte_identical() {
     restore(store.path(), snap.id, &restored).unwrap();
 
     let restored_bytes = fs::read(&restored).unwrap();
-    assert_eq!(original, restored_bytes, "restored bytes must be identical to original");
+    assert_eq!(
+        original, restored_bytes,
+        "restored bytes must be identical to original"
+    );
 }
 
-// ── multiple snapshots ─────────────────────────────────────────────────────────
+// -- multiple snapshots -------------------------------------------------------
 
 #[test]
 fn multiple_snapshots_listed_in_order() {
@@ -70,7 +82,7 @@ fn multiple_snapshots_listed_in_order() {
     }
 }
 
-// ── deduplication ──────────────────────────────────────────────────────────────
+// -- deduplication ------------------------------------------------------------
 
 #[test]
 fn identical_content_stored_once() {
@@ -84,11 +96,10 @@ fn identical_content_stored_once() {
     let snap1 = snapshot(store.path(), &s1_path, None).unwrap();
     let snap2 = snapshot(store.path(), &s2_path, None).unwrap();
 
-    // Both snapshots must reference the same blob.
     assert_eq!(snap1.blob_hash, snap2.blob_hash);
 }
 
-// ── verify ─────────────────────────────────────────────────────────────────────
+// -- verify -------------------------------------------------------------------
 
 #[test]
 fn verify_passes_on_intact_blob() {
@@ -106,13 +117,29 @@ fn verify_fails_on_missing_snapshot() {
     assert!(matches!(err, DvcError::NotFound(_)));
 }
 
-// ── gc ──────────────────────────────────────────────────────────────────────
+#[test]
+fn verify_all_reports_all_blobs() {
+    let store = make_store();
+    let files = tempfile::tempdir().unwrap();
+    write_file(files.path(), "a.psd", b"aaa");
+    write_file(files.path(), "b.psd", b"bbb");
+    snapshot(store.path(), &files.path().join("a.psd"), None).unwrap();
+    snapshot(store.path(), &files.path().join("b.psd"), None).unwrap();
+
+    let report = verify_all(store.path()).unwrap();
+    assert_eq!(report.checked, 2);
+    assert_eq!(report.ok, 2);
+    assert!(report.corrupt.is_empty());
+    assert!(report.missing.is_empty());
+}
+
+// -- gc -----------------------------------------------------------------------
 
 #[test]
 fn gc_on_empty_store_is_zero() {
     let store = make_store();
-    let deleted = gc(store.path()).unwrap();
-    assert_eq!(deleted, 0);
+    let report = gc(store.path(), true).unwrap();
+    assert_eq!(report.orphaned_count, 0);
 }
 
 #[test]
@@ -123,12 +150,182 @@ fn gc_does_not_delete_referenced_blobs() {
     let snap = snapshot(store.path(), &src, None).unwrap();
     let hash = snap.blob_hash.clone();
 
-    let deleted = gc(store.path()).unwrap();
-    assert_eq!(deleted, 0);
+    let report = gc(store.path(), true).unwrap();
+    assert_eq!(report.orphaned_count, 0);
     assert!(design_version_core::cas::blob_exists(store.path(), &hash));
 }
 
-// ── proptest ──────────────────────────────────────────────────────────────────
+#[test]
+fn gc_dry_run_does_not_delete() {
+    let store = make_store();
+    let files = tempfile::tempdir().unwrap();
+    let src = write_file(files.path(), "orphan.psd", b"orphan");
+    let snap = snapshot(store.path(), &src, None).unwrap();
+    let hash = snap.blob_hash.clone();
+
+    // Delete the snapshot to orphan the blob.
+    let conn = design_version_core::manifest::open(&store.path().join("manifest.db")).unwrap();
+    design_version_core::manifest::delete_snapshot(&conn, snap.id).unwrap();
+    drop(conn);
+
+    let report = gc_dry_run(store.path()).unwrap();
+    assert_eq!(report.orphaned_count, 1);
+    assert!(report.orphaned_bytes > 0);
+    // Blob should still exist.
+    assert!(design_version_core::cas::blob_exists(store.path(), &hash));
+
+    // Now actually delete.
+    let report = gc(store.path(), true).unwrap();
+    assert_eq!(report.orphaned_count, 1);
+    assert!(!design_version_core::cas::blob_exists(store.path(), &hash));
+}
+
+// -- diff ---------------------------------------------------------------------
+
+#[test]
+fn diff_same_content() {
+    let store = make_store();
+    let files = tempfile::tempdir().unwrap();
+    let src = write_file(files.path(), "a.psd", b"same");
+    let s1 = snapshot(store.path(), &src, Some("first")).unwrap();
+    let s2 = snapshot(store.path(), &src, Some("second")).unwrap();
+
+    let report = diff(store.path(), s1.id, s2.id).unwrap();
+    assert!(report.same_content);
+    assert_eq!(report.size_delta_bytes, 0);
+}
+
+#[test]
+fn diff_different_content() {
+    let store = make_store();
+    let files = tempfile::tempdir().unwrap();
+    let src1 = write_file(files.path(), "a.psd", b"short");
+    let src2 = write_file(
+        files.path(),
+        "b.psd",
+        b"a much longer file with more content",
+    );
+    let s1 = snapshot(store.path(), &src1, None).unwrap();
+    let s2 = snapshot(store.path(), &src2, None).unwrap();
+
+    let report = diff(store.path(), s1.id, s2.id).unwrap();
+    assert!(!report.same_content);
+    assert!(report.size_delta_bytes > 0);
+    assert!(report.size_delta_percent.unwrap() > 0.0);
+}
+
+#[test]
+fn diff_nonexistent_snapshot() {
+    let store = make_store();
+    assert!(diff(store.path(), 999, 1000).is_err());
+}
+
+// -- labels -------------------------------------------------------------------
+
+#[test]
+fn label_filtering() {
+    let store = make_store();
+    let files = tempfile::tempdir().unwrap();
+    let src = write_file(files.path(), "a.psd", b"content");
+
+    snapshot(store.path(), &src, Some("before-review")).unwrap();
+    snapshot(store.path(), &src, Some("after-review")).unwrap();
+    snapshot(store.path(), &src, None).unwrap();
+
+    let results = list_by_label(store.path(), "review").unwrap();
+    assert_eq!(results.len(), 2);
+
+    let results = list_by_label(store.path(), "before").unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn file_filtering() {
+    let store = make_store();
+    let files = tempfile::tempdir().unwrap();
+    let src1 = write_file(files.path(), "logo.psd", b"logo");
+    let src2 = write_file(files.path(), "banner.png", b"banner");
+
+    snapshot(store.path(), &src1, None).unwrap();
+    snapshot(store.path(), &src2, None).unwrap();
+
+    let results = list_by_file(store.path(), "logo").unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].file_path.contains("logo"));
+}
+
+#[test]
+fn update_label_works() {
+    let store = make_store();
+    let files = tempfile::tempdir().unwrap();
+    let src = write_file(files.path(), "a.psd", b"data");
+    let snap = snapshot(store.path(), &src, Some("old")).unwrap();
+
+    update_label(store.path(), snap.id, "new").unwrap();
+    let snaps = list(store.path()).unwrap();
+    assert_eq!(snaps[0].label.as_deref(), Some("new"));
+}
+
+// -- directory snapshots ------------------------------------------------------
+
+#[test]
+fn snapshot_dir_round_trip() {
+    let store = make_store();
+    let dir = tempfile::tempdir().unwrap();
+
+    fs::create_dir_all(dir.path().join("subdir")).unwrap();
+    fs::write(dir.path().join("root.psd"), b"root file").unwrap();
+    fs::write(dir.path().join("subdir/nested.png"), b"nested file").unwrap();
+
+    let snaps = snapshot_dir(store.path(), dir.path(), Some("batch-test")).unwrap();
+    assert_eq!(snaps.len(), 2);
+    assert!(snaps[0].batch_id.is_some());
+    let batch_id = snaps[0].batch_id.as_ref().unwrap().clone();
+    assert_eq!(snaps[1].batch_id.as_deref(), Some(batch_id.as_str()));
+
+    // Restore the batch.
+    let out = tempfile::tempdir().unwrap();
+    let count = restore_batch(store.path(), &batch_id, out.path()).unwrap();
+    assert_eq!(count, 2);
+
+    for snap in &snaps {
+        let restored_path = out.path().join(&snap.file_path);
+        assert!(restored_path.exists(), "missing: {}", snap.file_path);
+    }
+}
+
+#[test]
+fn snapshot_dir_skips_hidden_files() {
+    let store = make_store();
+    let dir = tempfile::tempdir().unwrap();
+
+    fs::write(dir.path().join("visible.psd"), b"yes").unwrap();
+    fs::write(dir.path().join(".hidden"), b"no").unwrap();
+    let dot_dir = dir.path().join(".git");
+    fs::create_dir_all(&dot_dir).unwrap();
+    fs::write(dot_dir.join("config"), b"no").unwrap();
+
+    let snaps = snapshot_dir(store.path(), dir.path(), None).unwrap();
+    assert_eq!(snaps.len(), 1);
+    assert!(snaps[0].file_path.contains("visible"));
+}
+
+#[test]
+fn snapshot_dir_preserves_relative_paths() {
+    let store = make_store();
+    let dir = tempfile::tempdir().unwrap();
+
+    fs::create_dir_all(dir.path().join("assets/icons")).unwrap();
+    fs::write(dir.path().join("main.psd"), b"main").unwrap();
+    fs::write(dir.path().join("assets/icons/logo.png"), b"logo").unwrap();
+
+    let snaps = snapshot_dir(store.path(), dir.path(), None).unwrap();
+    let paths: Vec<&str> = snaps.iter().map(|s| s.file_path.as_str()).collect();
+    assert!(paths.contains(&"main.psd"));
+    assert!(paths.contains(&"assets/icons/logo.png"));
+}
+
+// -- proptest -----------------------------------------------------------------
 
 proptest::proptest! {
     #[test]
@@ -144,7 +341,7 @@ proptest::proptest! {
     }
 }
 
-// ── large file test (gated) ───────────────────────────────────────────────────
+// -- large file test (gated) --------------------------------------------------
 
 #[test]
 #[ignore = "set RUN_LARGE_FILE_TESTS=1 and run with -- --ignored to enable"]
@@ -157,7 +354,6 @@ fn large_file_800mb_snapshot_restore() {
     let store = make_store();
     let files = tempfile::tempdir().unwrap();
 
-    // Write 800 MB of patterned bytes without allocating them all at once.
     let src = files.path().join("large.psd");
     {
         let f = fs::File::create(&src).unwrap();
