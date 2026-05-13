@@ -2,14 +2,14 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use design_version_core as dvc;
+use design_version_core as dsv;
 
-/// dvc — local design file snapshot tool (v1)
+/// dsv — local design file snapshot tool (v1)
 #[derive(Debug, Parser)]
-#[command(name = "dvc", about = "Local snapshot store for designer binary files")]
+#[command(name = "dsv", about = "Local snapshot store for designer binary files")]
 struct Cli {
-    /// Path to the dvc store directory (default: .dvc in the current directory)
-    #[arg(long, short, global = true, default_value = ".dvc")]
+    /// Path to the dsv store directory (default: .dsv in the current directory)
+    #[arg(long, short, global = true, default_value = ".dsv")]
     store: PathBuf,
 
     #[command(subcommand)]
@@ -18,7 +18,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Initialise a new dvc store
+    /// Initialise a new dsv store
     Init,
 
     /// Snapshot a file into the store
@@ -36,7 +36,7 @@ enum Command {
 
     /// Restore a snapshot to a path
     Restore {
-        /// Snapshot ID (from `dvc list`)
+        /// Snapshot ID (from `dsv list`)
         id: i64,
 
         /// Destination path to write the restored file to
@@ -58,7 +58,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Init => {
-            let project = dvc::init(&cli.store)
+            let project = dsv::init(&cli.store)
                 .with_context(|| format!("Failed to init store at {}", cli.store.display()))?;
             println!(
                 "Initialised store at {} (project id={})",
@@ -67,7 +67,7 @@ fn main() -> Result<()> {
         }
 
         Command::Snapshot { file, label } => {
-            let snap = dvc::snapshot(&cli.store, &file, label.as_deref())
+            let snap = dsv::snapshot(&cli.store, &file, label.as_deref())
                 .with_context(|| format!("Failed to snapshot {}", file.display()))?;
             println!(
                 "Snapshot #{} — {} ({} bytes) hash={}",
@@ -82,15 +82,15 @@ fn main() -> Result<()> {
         }
 
         Command::List => {
-            let snaps = dvc::list(&cli.store)
+            let snaps = dsv::list(&cli.store)
                 .with_context(|| "Failed to list snapshots")?;
 
             if snaps.is_empty() {
-                println!("No snapshots yet. Run `dvc snapshot <file>` to capture one.");
+                println!("No snapshots yet. Run `dsv snapshot <file>` to capture one.");
                 return Ok(());
             }
 
-            let total = dvc::total_logical_bytes(&cli.store).unwrap_or(0);
+            let total = dsv::total_logical_bytes(&cli.store).unwrap_or(0);
             println!("{:<6} {:<28} {:<16} {:<12} {}", "ID", "Created", "Hash prefix", "Size", "Label");
             println!("{}", "-".repeat(80));
             for snap in &snaps {
@@ -112,19 +112,19 @@ fn main() -> Result<()> {
         }
 
         Command::Restore { id, out } => {
-            dvc::restore(&cli.store, id, &out)
+            dsv::restore(&cli.store, id, &out)
                 .with_context(|| format!("Failed to restore snapshot #{id} to {}", out.display()))?;
             println!("Restored snapshot #{id} → {}", out.display());
         }
 
         Command::Verify { id } => {
-            dvc::verify(&cli.store, id)
+            dsv::verify(&cli.store, id)
                 .with_context(|| format!("Failed to verify snapshot #{id}"))?;
             println!("Snapshot #{id}: OK");
         }
 
         Command::Gc => {
-            let deleted = dvc::gc(&cli.store)
+            let deleted = dsv::gc(&cli.store)
                 .with_context(|| "GC failed")?;
             if deleted == 0 {
                 println!("Nothing to collect.");

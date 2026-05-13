@@ -13,14 +13,14 @@ _Last updated: 2026-05-13 — Milestone 1 implemented; all 25 tests green_
 - `core/src/hash.rs` — BLAKE3 streaming hasher, `HashWriter<W>` (tee-style single-pass hash+write)
 - `core/src/manifest.rs` — SQLite schema + CRUD for `projects` and `snapshots` tables
 - `core/src/error.rs` — `DvcError` enum (`Io`, `HashMismatch`, `Manifest`, `NotFound`, `InvalidArgument`)
-- `cli/src/main.rs` — clap CLI: `dvc init/snapshot/list/restore/verify/gc`
+- `cli/src/main.rs` — clap CLI: `dsv init/snapshot/list/restore/verify/gc`
 - `core/tests/integration.rs` — integration + proptest suite; 800 MB test gated behind `RUN_LARGE_FILE_TESTS=1`
 
 ## Class / component diagram
 
 ```mermaid
 flowchart TD
-    CLI["dvc\n(cli/src/main.rs)\nclap subcommands"]
+    CLI["dsv\n(cli/src/main.rs)\nclap subcommands"]
 
     subgraph core["design-version-core (lib)"]
         API["api.rs\ninit · snapshot · list\nrestore · verify · gc"]

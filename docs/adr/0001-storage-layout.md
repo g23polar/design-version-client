@@ -62,7 +62,7 @@ If the process crashes after step 3 but before step 5, a stray blob sits in `obj
 - Restore is a single sequential read — predictable, fast.
 
 ### Negative / Accepted trade-offs
-- **Storage growth is linear in the number of unique versions.** 50 distinct 800 MB saves = 40 GB. Mitigated by: (a) `dvc gc` to prune old snapshots, (b) surfacing storage usage in `dvc list` output, (c) clear documentation.
+- **Storage growth is linear in the number of unique versions.** 50 distinct 800 MB saves = 40 GB. Mitigated by: (a) `dsv gc` to prune old snapshots, (b) surfacing storage usage in `dsv list` output, (c) clear documentation.
 - **No space savings for near-identical revisions.** PSD files re-compress their internal structure on every save, making byte-level similarity low in practice. Chunked CAS would save little without application-aware chunking, which is out of scope.
 - **Windows atomic rename.** `std::fs::rename` is not guaranteed atomic over an existing destination on Windows. Tracked as a risk; addressed in the implementation with a Windows-specific code path if required. See `plan.md` → Risks.
 

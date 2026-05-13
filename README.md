@@ -15,21 +15,21 @@ Save and restore any version of your `.psd`, `.psb`, `.3dm`, `.pdf`, `.png`, or 
 cargo build --release
 
 # Alias for convenience (optional)
-alias dvc=./target/release/dvc
+alias dsv=./target/release/dsv
 
-# 1. Initialise a store (creates .dvc/ in the current directory)
-dvc init
+# 1. Initialise a store (creates .dsv/ in the current directory)
+dsv init
 
 # 2. Snapshot a file
-dvc snapshot ~/Desktop/logo_v3.psd --label "before client review"
+dsv snapshot ~/Desktop/logo_v3.psd --label "before client review"
 # Snapshot #1 — 2026-05-13T21:00:00Z (142.7 MiB) hash=ab3f1e2d...
 
 # 3. Make changes, then snapshot again
-dvc snapshot ~/Desktop/logo_v3.psd --label "after client review"
+dsv snapshot ~/Desktop/logo_v3.psd --label "after client review"
 # Snapshot #2 — 2026-05-13T21:05:00Z (143.1 MiB) hash=cd91aa44...
 
 # 4. List all snapshots
-dvc list
+dsv list
 # ID     Created                      Hash prefix      Size         Label
 # ──────────────────────────────────────────────────────────────────────────────
 # 1      2026-05-13T21:00:00Z         ab3f1e2d...      142.7 MiB    before client review
@@ -38,23 +38,23 @@ dvc list
 #   2 snapshot(s) — 285.8 MiB logical total
 
 # 5. Restore an earlier version
-dvc restore 1 ~/Desktop/logo_v3_restored.psd
+dsv restore 1 ~/Desktop/logo_v3_restored.psd
 
 # 6. Verify blob integrity
-dvc verify 1
+dsv verify 1
 
 # 7. Garbage-collect orphaned blobs (after manually deleting snapshot records)
-dvc gc
+dsv gc
 ```
 
 ### Custom store path
 
-By default the store lives at `.dvc/` relative to where you run the command.
+By default the store lives at `.dsv/` relative to where you run the command.
 Pass `--store` to override:
 
 ```sh
-dvc --store /Volumes/ExternalSSD/design-snapshots init
-dvc --store /Volumes/ExternalSSD/design-snapshots snapshot big-file.psb
+dsv --store /Volumes/ExternalSSD/design-snapshots init
+dsv --store /Volumes/ExternalSSD/design-snapshots snapshot big-file.psb
 ```
 
 ## Architecture
@@ -77,16 +77,12 @@ cargo test
 RUN_LARGE_FILE_TESTS=1 cargo test -- --ignored large_file_800mb_snapshot_restore
 ```
 
-## ⚠ Name clash note
-
-The `dvc` binary name is taken by [iterative.ai's Data Version Control](https://dvc.org). Do not publish or distribute under this name. A new name is required before any public release (tracked in `plan.md` → Risks).
-
 ## Roadmap
 
 See `plan.md` → Milestone 2 and 3 for planned work:
 - Multi-file / directory snapshots
 - Named labels first-class in CLI
-- `dvc gc` improvements
+- `dsv gc` improvements
 - Cross-platform CI (macOS ✅, Windows ⬜, Linux ⬜)
 - Binary rename
 - Chunked CAS for inter-version dedup

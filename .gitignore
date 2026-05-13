@@ -2,6 +2,10 @@
 # --- Handoffs (agent session logs — not for version control) ---
 handoffs/
 
+# --- Local project docs (not public) ---
+CONTEXT.md
+plan.md
+
 # --- Rust ---
 target/
 

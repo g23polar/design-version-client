@@ -40,14 +40,14 @@
   <li><code>core/src/hash.rs</code> — BLAKE3 streaming hasher, <code>HashWriter&lt;W&gt;</code> (tee-style single-pass hash+write)</li>
   <li><code>core/src/manifest.rs</code> — SQLite schema + CRUD for <code>projects</code> and <code>snapshots</code> tables</li>
   <li><code>core/src/error.rs</code> — <code>DvcError</code> enum (<code>Io</code>, <code>HashMismatch</code>, <code>Manifest</code>, <code>NotFound</code>, <code>InvalidArgument</code>)</li>
-  <li><code>cli/src/main.rs</code> — clap CLI: <code>dvc init/snapshot/list/restore/verify/gc</code></li>
+  <li><code>cli/src/main.rs</code> — clap CLI: <code>dsv init/snapshot/list/restore/verify/gc</code></li>
   <li><code>core/tests/integration.rs</code> — integration + proptest suite; 800 MB test gated behind <code>RUN_LARGE_FILE_TESTS=1</code></li>
 </ul>
 
 <h2>Class / Component Diagram</h2>
 <div class="mermaid">
 flowchart TD
-    CLI["dvc\n(cli/src/main.rs)\nclap subcommands"]
+    CLI["dsv\n(cli/src/main.rs)\nclap subcommands"]
 
     subgraph core["design-version-core (lib)"]
         API["api.rs\ninit · snapshot · list\nrestore · verify · gc"]
