@@ -1,4 +1,7 @@
 
+# --- Handoffs (agent session logs — not for version control) ---
+handoffs/
+
 # --- Rust ---
 target/
 
