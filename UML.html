@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UML — design-version-client</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  </script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    h1 { border-bottom: 2px solid #ddd; padding-bottom: .4rem; }
+    h2 { margin-top: 2rem; color: #444; }
+    .meta { color: #888; font-size: .9rem; margin-top: -.5rem; margin-bottom: 1.5rem; }
+    .mermaid { background: #f8f8f8; border-radius: 8px; padding: 1rem; }
+    ul { line-height: 1.8; }
+    code { background: #f0f0f0; padding: .1em .3em; border-radius: 3px; font-size: .9em; }
+  </style>
+</head>
+<body>
+
+<h1>UML — design-version-client</h1>
+<p class="meta">Last updated: 2026-05-13 — Milestone 1 implemented; all 25 tests green</p>
+
+<h2>Overview</h2>
+<p>
+  <code>design-version-client</code> is a local, library-first snapshot store for large designer
+  binary files (<code>.psd</code>, <code>.psb</code>, <code>.3dm</code>, <code>.pdf</code>,
+  <code>.png</code>, <code>.jpg</code>). It is a Rust workspace with two crates: a
+  <code>core</code> library that owns all logic, and a thin <code>cli</code> binary used for
+  manual testing. Storage uses a full-file content-addressable store (BLAKE3 blobs + SQLite
+  manifest). No network, no daemon.
+</p>
+
+<h2>Module map</h2>
+<ul>
+  <li><code>core/src/api.rs</code> — public entry points: <code>init</code>, <code>snapshot</code>, <code>list</code>, <code>restore</code>, <code>verify</code>, <code>gc</code></li>
+  <li><code>core/src/cas.rs</code> — content-addressable object store: atomic blob write/read/delete, <code>sweep_tmp</code></li>
+  <li><code>core/src/hash.rs</code> — BLAKE3 streaming hasher, <code>HashWriter&lt;W&gt;</code> (tee-style single-pass hash+write)</li>
+  <li><code>core/src/manifest.rs</code> — SQLite schema + CRUD for <code>projects</code> and <code>snapshots</code> tables</li>
+  <li><code>core/src/error.rs</code> — <code>DvcError</code> enum (<code>Io</code>, <code>HashMismatch</code>, <code>Manifest</code>, <code>NotFound</code>, <code>InvalidArgument</code>)</li>
+  <li><code>cli/src/main.rs</code> — clap CLI: <code>dvc init/snapshot/list/restore/verify/gc</code></li>
+  <li><code>core/tests/integration.rs</code> — integration + proptest suite; 800 MB test gated behind <code>RUN_LARGE_FILE_TESTS=1</code></li>
+</ul>
+
+<h2>Class / Component Diagram</h2>
+<div class="mermaid">
+flowchart TD
+    CLI["dvc\n(cli/src/main.rs)\nclap subcommands"]
+
+    subgraph core["design-version-core (lib)"]
+        API["api.rs\ninit · snapshot · list\nrestore · verify · gc"]
+        CAS["cas.rs\nwrite_blob · read_blob\nblob_exists · delete_blob\nsweep_tmp"]
+        HASH["hash.rs\nhash_reader\nHashWriter"]
+        MANIFEST["manifest.rs\nProject · Snapshot\nSQLite CRUD"]
+        ERROR["error.rs\nDvcError"]
+    end
+
+    STORE[("objects/\nh[0..2]/hash")]
+    DB[("manifest.db\nSQLite WAL")]
+
+    CLI -->|path dep| API
+    API --> CAS
+    API --> MANIFEST
+    CAS --> HASH
+    CAS --> STORE
+    MANIFEST --> DB
+    CAS --> ERROR
+    MANIFEST --> ERROR
+    HASH --> ERROR
+    API --> ERROR
+</div>
+
+<h2>Key Data Flows</h2>
+<ul>
+  <li><strong>snapshot:</strong> <code>api::snapshot</code> → opens file → <code>cas::write_blob</code> (single-pass BLAKE3 + atomic tmp→rename) → <code>manifest::insert_snapshot</code></li>
+  <li><strong>restore:</strong> <code>api::restore</code> → <code>manifest::get_snapshot</code> → <code>cas::read_blob</code> → verify hash → stream blob to <code>out_path</code></li>
+  <li><strong>gc:</strong> <code>api::gc</code> → <code>manifest::referenced_hashes</code> → walk <code>objects/</code> → <code>cas::delete_blob</code> for any unreferenced hash</li>
+  <li><strong>verify:</strong> <code>api::verify</code> → <code>manifest::get_snapshot</code> → <code>hash::hash_reader(blob)</code> → compare against stored hash</li>
+</ul>
+
+<h2>Last Activity</h2>
+<ul>
+  <li><code>2026-05-13</code> — Milestone 1 complete: Cargo workspace, all core modules, CLI, 25 tests. Files touched: <code>Cargo.toml</code>, <code>core/**</code>, <code>cli/src/main.rs</code>, <code>core/tests/integration.rs</code>, <code>README.md</code>, <code>CONTEXT.md</code>, <code>docs/adr/0001-storage-layout.md</code></li>
+  <li><code>2026-05-13</code> — Project bootstrapped: scaffold, <code>CONTEXT.md</code>, <code>ADR-0001</code>, <code>UML.md</code> created</li>
+</ul>
+
+</body>
+</html>

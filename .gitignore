@@ -1,0 +1,11 @@
+
+# --- Rust ---
+target/
+
+# --- pi harness ---
+.pi/sessions/
+.pi/cache/
+.pi/tmp/
+
+# --- macOS ---
+.DS_Store
