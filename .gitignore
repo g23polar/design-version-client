@@ -6,6 +6,9 @@ handoffs/
 CONTEXT.md
 plan.md
 
+# --- Testing directories ---
+beta-test/
+
 # --- Rust ---
 target/
 
