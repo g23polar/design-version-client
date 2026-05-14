@@ -68,14 +68,14 @@ fn run_migrations(conn: &Connection) -> Result<()> {
 
 // -- Public structs -----------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Project {
     pub id: i64,
     pub root_path: String,
     pub created_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Snapshot {
     pub id: i64,
     pub project_id: i64,

@@ -1,6 +1,6 @@
 # UML — design-version-client
 
-_Last updated: 2026-05-13 — User documentation created: comprehensive non-coder guide with real-world workflows, troubleshooting, and safety notes_
+_Last updated: 2026-05-13 — Web interface added: `dsv serve` command with Axum backend and embedded SPA frontend for browsing/managing snapshots_
 
 ## Overview
 
@@ -14,7 +14,11 @@ _Last updated: 2026-05-13 — User documentation created: comprehensive non-code
 - `core/src/manifest.rs` — SQLite schema v2 (batch_id column) + CRUD for `projects` and `snapshots` tables, migration system
 - `core/src/diff.rs` — snapshot metadata comparison: `DiffReport` struct with size deltas and content matching
 - `core/src/error.rs` — `DvcError` enum (`Io`, `HashMismatch`, `Manifest`, `NotFound`, `InvalidArgument`)
-- `cli/src/main.rs` — clap CLI: `dsv init/snapshot/list/restore/verify/gc/label/diff` with filtering and batch operations
+- `cli/src/main.rs` — clap CLI: `dsv init/snapshot/list/restore/verify/gc/label/diff/delete/serve` with filtering and batch operations
+- `cli/src/web/mod.rs` — web module root
+- `cli/src/web/server.rs` — Axum server setup, static asset serving, router configuration
+- `cli/src/web/handlers.rs` — REST API handlers for snapshots, verify, diff, label, delete
+- `cli/src/web/assets/` — embedded SPA (index.html, style.css, app.js)
 - `core/tests/integration.rs` — integration + proptest suite; 800 MB test gated behind `RUN_LARGE_FILE_TESTS=1`
 
 ## Class / component diagram
@@ -22,6 +26,7 @@ _Last updated: 2026-05-13 — User documentation created: comprehensive non-code
 ```mermaid
 flowchart TD
     CLI["dsv\n(cli/src/main.rs)\nclap subcommands"]
+    WEB["web/\nserver.rs · handlers.rs\nAxum REST API + embedded SPA"]
 
     subgraph core["design-version-core (lib)"]
         API["api.rs\ninit · snapshot · snapshot_dir\nlist · restore · restore_batch\nverify · verify_all · gc · diff"]
@@ -36,6 +41,8 @@ flowchart TD
     DB[("manifest.db\nSQLite WAL")]
 
     CLI -->|path dep| API
+    WEB -->|path dep| API
+    CLI --> WEB
     API --> CAS
     API --> MANIFEST
     API --> DIFF
@@ -62,6 +69,7 @@ flowchart TD
 
 ## Last activity
 
+- `2026-05-13` — **Web interface added:** `dsv serve` subcommand with Axum backend, REST API, embedded SPA frontend. Supports list/filter, verify, diff, label editing, delete with confirmation. Files touched: `cli/Cargo.toml`, `cli/src/main.rs`, `cli/src/web/**`, `core/Cargo.toml`, `core/src/*.rs` (serde derives), `README.md`
 - `2026-05-13` — **User documentation created:** Comprehensive non-coder guide covering basic concepts, real-world workflows, troubleshooting, and safety. Files touched: `docs/USER-GUIDE.md`, `README.md`, `UML.md`
 - `2026-05-13` — **Milestone 2 validated:** Comprehensive beta testing across 15 designer scenarios, fixed CLI batch argument parsing bugs (restore/label), corrected filtered list totals. All core workflows verified: project evolution, disaster recovery, team handoff, storage integrity. Ready for UI development.
 - `2026-05-13` — **Milestone 2 complete:** Multi-file directory snapshots (batch_id schema v2), label workflows, GC/verify improvements, diff command, cross-platform CI. Added `walkdir` dependency, `core/src/diff.rs` module. All 53 tests passing (34 unit + 19 integration + 1 gated 800MB benchmark)

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DSV — Design Snapshot Version</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>DSV</h1>
+    <span class="subtitle">Design Snapshot Version</span>
+  </div>
+  <div class="header-right">
+    <span id="store-info" class="store-info"></span>
+    <button id="btn-refresh" class="btn btn-secondary" onclick="app.refresh()">↻ Refresh</button>
+    <button id="btn-verify" class="btn btn-accent" onclick="app.verifyAll()">✓ Verify All</button>
+  </div>
+</header>
+
+<main>
+  <!-- Status bar -->
+  <div id="status-bar" class="status-bar hidden"></div>
+
+  <!-- Filters -->
+  <section class="filters">
+    <input type="text" id="filter-file" placeholder="Filter by file name…" />
+    <input type="text" id="filter-label" placeholder="Filter by label…" />
+    <button class="btn btn-small" onclick="app.applyFilters()">Filter</button>
+    <button class="btn btn-small btn-ghost" onclick="app.clearFilters()">Clear</button>
+  </section>
+
+  <!-- Summary -->
+  <section id="summary" class="summary"></section>
+
+  <!-- Snapshot table -->
+  <section class="table-container">
+    <table id="snapshot-table">
+      <thead>
+        <tr>
+          <th class="col-id">ID</th>
+          <th class="col-file">File</th>
+          <th class="col-size">Size</th>
+          <th class="col-hash">Hash</th>
+          <th class="col-label">Label</th>
+          <th class="col-batch">Batch</th>
+          <th class="col-date">Created</th>
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="snapshot-body">
+      </tbody>
+    </table>
+    <div id="empty-state" class="empty-state hidden">
+      <p>No snapshots found.</p>
+    </div>
+  </section>
+
+  <!-- Diff Modal -->
+  <div id="diff-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Snapshot Diff</h2>
+        <button class="btn-close" onclick="app.closeModal('diff-modal')">&times;</button>
+      </div>
+      <div id="diff-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Delete Confirm Modal -->
+  <div id="delete-modal" class="modal hidden">
+    <div class="modal-content modal-small">
+      <div class="modal-header">
+        <h2>Confirm Delete</h2>
+        <button class="btn-close" onclick="app.closeModal('delete-modal')">&times;</button>
+      </div>
+      <div id="delete-body" class="modal-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="app.closeModal('delete-modal')">Cancel</button>
+        <button id="delete-confirm-btn" class="btn btn-danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verify Modal -->
+  <div id="verify-modal" class="modal hidden">
+    <div class="modal-content modal-small">
+      <div class="modal-header">
+        <h2>Verification Report</h2>
+        <button class="btn-close" onclick="app.closeModal('verify-modal')">&times;</button>
+      </div>
+      <div id="verify-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Diff Picker -->
+  <div id="diff-picker" class="diff-picker hidden">
+    <span>Select second snapshot to compare with <strong id="diff-from-id"></strong>:</span>
+    <button class="btn btn-small btn-ghost" onclick="app.cancelDiff()">Cancel</button>
+  </div>
+
+</main>
+
+<footer>
+  <span>DSV Web Interface — metadata only, no file content loaded</span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

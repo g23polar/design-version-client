@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use design_version_core as dsv;
 
+mod web;
+
 /// dsv — local design file snapshot tool
 #[derive(Debug, Parser)]
 #[command(name = "dsv", about = "Local snapshot store for designer binary files")]
@@ -110,9 +112,17 @@ enum Command {
         #[arg(long)]
         confirm: bool,
     },
+
+    /// Start the web interface
+    Serve {
+        /// Port to listen on (default: 3000)
+        #[arg(long, short, default_value = "3000")]
+        port: u16,
+    },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -342,7 +352,7 @@ fn main() -> Result<()> {
             if !confirm {
                 println!("Dry-run mode. Use --confirm to actually delete.");
             }
-            
+
             if let Some(batch_id) = batch {
                 if confirm {
                     let report = dsv::delete_batch(&cli.store, &batch_id)
@@ -362,7 +372,12 @@ fn main() -> Result<()> {
                         &batch_id[..8.min(batch_id.len())]
                     );
                     for snap in &snaps {
-                        println!("  #{} {} ({})", snap.id, snap.file_path, format_bytes(snap.file_size));
+                        println!(
+                            "  #{} {} ({})",
+                            snap.id,
+                            snap.file_path,
+                            format_bytes(snap.file_size)
+                        );
                     }
                 }
             } else if let Some(id) = id {
@@ -388,6 +403,10 @@ fn main() -> Result<()> {
             } else {
                 anyhow::bail!("Must specify either --id <ID> or --batch <BATCH_ID>");
             }
+        }
+
+        Command::Serve { port } => {
+            web::server::run(cli.store, port).await?;
         }
     }
 

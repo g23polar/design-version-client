@@ -21,7 +21,7 @@
 <body>
 
 <h1>UML — design-version-client</h1>
-<p class="meta">Last updated: 2026-05-13 — Milestone 2 validated: comprehensive beta testing complete, CLI fixes applied, ready for UI development</p>
+<p class="meta">Last updated: 2026-05-13 — Web interface added: dsv serve command with Axum backend and embedded SPA frontend for browsing/managing snapshots</p>
 
 <h2>Overview</h2>
 <p>
@@ -35,12 +35,16 @@
 
 <h2>Module map</h2>
 <ul>
-  <li><code>core/src/api.rs</code> — public entry points: <code>init</code>, <code>snapshot</code>, <code>list</code>, <code>restore</code>, <code>verify</code>, <code>gc</code>, <code>total_logical_bytes</code></li>
+  <li><code>core/src/api.rs</code> — public entry points: <code>init</code>, <code>snapshot</code>, <code>snapshot_dir</code>, <code>list</code>, <code>restore</code>, <code>restore_batch</code>, <code>verify</code>, <code>verify_all</code>, <code>gc</code>, <code>diff</code>, <code>total_logical_bytes</code></li>
   <li><code>core/src/cas.rs</code> — content-addressable object store: atomic blob write/read/delete, <code>sweep_tmp</code></li>
   <li><code>core/src/hash.rs</code> — BLAKE3 streaming hasher, <code>HashWriter&lt;W&gt;</code> (tee-style single-pass hash+write)</li>
-  <li><code>core/src/manifest.rs</code> — SQLite schema + CRUD for <code>projects</code> and <code>snapshots</code> tables</li>
+  <li><code>core/src/manifest.rs</code> — SQLite schema v2 (batch_id column) + CRUD for <code>projects</code> and <code>snapshots</code> tables, migration system</li>
+  <li><code>core/src/diff.rs</code> — snapshot metadata comparison: <code>DiffReport</code> struct with size deltas and content matching</li>
   <li><code>core/src/error.rs</code> — <code>DvcError</code> enum (<code>Io</code>, <code>HashMismatch</code>, <code>Manifest</code>, <code>NotFound</code>, <code>InvalidArgument</code>)</li>
-  <li><code>cli/src/main.rs</code> — clap CLI: <code>dsv init/snapshot/list/restore/verify/gc</code></li>
+  <li><code>cli/src/main.rs</code> — clap CLI: <code>dsv init/snapshot/list/restore/verify/gc/label/diff/delete/serve</code></li>
+  <li><code>cli/src/web/server.rs</code> — Axum server setup, static asset serving, router configuration</li>
+  <li><code>cli/src/web/handlers.rs</code> — REST API handlers for snapshots, verify, diff, label, delete</li>
+  <li><code>cli/src/web/assets/</code> — embedded SPA (index.html, style.css, app.js)</li>
   <li><code>core/tests/integration.rs</code> — integration + proptest suite; 800 MB test gated behind <code>RUN_LARGE_FILE_TESTS=1</code></li>
 </ul>
 
@@ -48,12 +52,14 @@
 <div class="mermaid">
 flowchart TD
     CLI["dsv\n(cli/src/main.rs)\nclap subcommands"]
+    WEB["web/\nserver.rs · handlers.rs\nAxum REST API + embedded SPA"]
 
     subgraph core["design-version-core (lib)"]
-        API["api.rs\ninit · snapshot · list\nrestore · verify · gc"]
+        API["api.rs\ninit · snapshot · snapshot_dir\nlist · restore · restore_batch\nverify · verify_all · gc · diff"]
         CAS["cas.rs\nwrite_blob · read_blob\nblob_exists · delete_blob\nsweep_tmp"]
         HASH["hash.rs\nhash_reader\nHashWriter"]
-        MANIFEST["manifest.rs\nProject · Snapshot\nSQLite CRUD"]
+        MANIFEST["manifest.rs\nProject · Snapshot\nSQLite CRUD + migrations\nbatch_id schema v2"]
+        DIFF["diff.rs\nDiffReport\nmetadata comparison"]
         ERROR["error.rs\nDvcError"]
     end
 
@@ -61,27 +67,38 @@ flowchart TD
     DB[("manifest.db\nSQLite WAL")]
 
     CLI -->|path dep| API
+    WEB -->|path dep| API
+    CLI --> WEB
     API --> CAS
     API --> MANIFEST
+    API --> DIFF
     CAS --> HASH
     CAS --> STORE
     MANIFEST --> DB
+    DIFF --> MANIFEST
     CAS --> ERROR
     MANIFEST --> ERROR
     HASH --> ERROR
+    DIFF --> ERROR
     API --> ERROR
 </div>
 
 <h2>Key Data Flows</h2>
 <ul>
   <li><strong>snapshot:</strong> <code>api::snapshot</code> → opens file → <code>cas::write_blob</code> (single-pass BLAKE3 + atomic tmp→rename) → <code>manifest::insert_snapshot</code></li>
+  <li><strong>snapshot_dir:</strong> <code>api::snapshot_dir</code> → <code>walkdir</code> directory walk → batch all files under shared <code>batch_id</code> (UUID) → SQLite transaction rollback on partial failure</li>
   <li><strong>restore:</strong> <code>api::restore</code> → <code>manifest::get_snapshot</code> → <code>cas::read_blob</code> → verify hash → stream blob to <code>out_path</code></li>
-  <li><strong>gc:</strong> <code>api::gc</code> → <code>manifest::referenced_hashes</code> → walk <code>objects/</code> → <code>cas::delete_blob</code> for any unreferenced hash</li>
-  <li><strong>verify:</strong> <code>api::verify</code> → <code>manifest::get_snapshot</code> → <code>hash::hash_reader(blob)</code> → compare against stored hash</li>
+  <li><strong>restore_batch:</strong> <code>api::restore_batch</code> → <code>manifest::list_snapshots_by_batch</code> → restore all files preserving relative paths</li>
+  <li><strong>gc:</strong> <code>api::gc</code> → dry-run by default (count + bytes) → <code>--confirm</code> flag for actual deletion → <code>manifest::referenced_hashes</code> → <code>cas::delete_blob</code></li>
+  <li><strong>verify:</strong> <code>api::verify</code> → single snapshot or <code>verify_all</code> for all blobs → hash verification + missing/corrupt reporting</li>
+  <li><strong>diff:</strong> <code>api::diff</code> → pure metadata comparison → size deltas (bytes + percentage) + content match indicator</li>
+  <li><strong>web serve:</strong> <code>dsv serve</code> → Axum server on localhost → REST API calls core library directly → embedded SPA renders metadata in browser</li>
 </ul>
 
 <h2>Last Activity</h2>
 <ul>
+  <li><code>2026-05-13</code> — <strong>Web interface added:</strong> <code>dsv serve</code> subcommand with Axum backend, REST API, embedded SPA frontend. Supports list/filter, verify, diff, label editing, delete with confirmation. Files touched: <code>cli/Cargo.toml</code>, <code>cli/src/main.rs</code>, <code>cli/src/web/**</code>, <code>core/Cargo.toml</code>, <code>core/src/*.rs</code> (serde derives), <code>README.md</code></li>
+  <li><code>2026-05-13</code> — <strong>User documentation created:</strong> Comprehensive non-coder guide covering basic concepts, real-world workflows, troubleshooting, and safety. Files touched: <code>docs/USER-GUIDE.md</code>, <code>README.md</code>, <code>UML.md</code></li>
   <li><code>2026-05-13</code> — <strong>Milestone 2 validated:</strong> Comprehensive beta testing across 15 designer scenarios, fixed CLI batch argument parsing bugs (restore/label), corrected filtered list totals. All core workflows verified: project evolution, disaster recovery, team handoff, storage integrity. Ready for UI development.</li>
   <li><code>2026-05-13</code> — <strong>Milestone 2 complete:</strong> Multi-file directory snapshots (batch_id schema v2), label workflows, GC/verify improvements, diff command, cross-platform CI. Added <code>walkdir</code> dependency, <code>core/src/diff.rs</code> module. All 53 tests passing (34 unit + 19 integration + 1 gated 800MB benchmark)</li>
   <li><code>2026-05-13</code> — Renamed binary dvc → dsv (default store .dsv); removed CONTEXT.md + plan.md from repo. Files touched: <code>cli/Cargo.toml</code>, <code>cli/src/main.rs</code>, <code>README.md</code>, <code>.gitignore</code>, <code>docs/adr/0001-storage-layout.md</code>, <code>UML.md</code>, <code>UML.html</code></li>

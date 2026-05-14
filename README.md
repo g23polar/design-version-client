@@ -52,6 +52,10 @@ dsv verify 1       # verify a single snapshot
 # 11. Garbage-collect orphaned blobs
 dsv gc             # dry-run: shows what would be deleted
 dsv gc --confirm   # actually delete orphaned blobs
+
+# 12. Start the web interface
+dsv serve              # opens browser at http://localhost:3000
+dsv serve --port 8080  # use a custom port
 ```
 
 ### Custom store path
@@ -85,6 +89,7 @@ dsv --store /Volumes/ExternalSSD/design-snapshots snapshot big-file.psb
 | `dsv label --batch <id> <text>` | Label all snapshots in a batch |
 | `dsv verify [id] [--batch ID]` | Verify blob integrity (all, one, or batch) |
 | `dsv gc [--confirm]` | Garbage-collect orphaned blobs (dry-run by default) |
+| `dsv serve [--port PORT]` | Start the local web interface (default: port 3000) |
 
 ## Architecture
 
@@ -117,9 +122,9 @@ See `plan.md` for detailed planning.
 ### Done
 - ✅ Milestone 1 — single-file snapshot/restore/verify/gc
 - ✅ Milestone 2 — multi-file snapshots, labels, GC/verify improvements, diff, CI
+- ✅ Milestone 3 — local web interface (`dsv serve`) for browsing and managing snapshots
 
-### Future (Milestone 3+)
+### Future
 - Chunked CAS for inter-version dedup
 - Watch mode / autosave
-- UI binding (Tauri / native plugin) — separate planning conversation
 - Cloud sync

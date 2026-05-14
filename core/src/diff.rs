@@ -3,7 +3,7 @@
 use crate::manifest::Snapshot;
 
 /// Side-by-side comparison of two snapshots.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DiffReport {
     pub left: Snapshot,
     pub right: Snapshot,
