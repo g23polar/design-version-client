@@ -44,12 +44,12 @@ enum Command {
 
     /// Restore a snapshot (or batch) to a path
     Restore {
-        /// Snapshot ID (from `dsv list`). Omit if using --batch.
-        #[arg(required_unless_present = "batch")]
-        id: Option<i64>,
-
         /// Destination path to write the restored file/directory to
         out: PathBuf,
+
+        /// Snapshot ID (from `dsv list`)
+        #[arg(long, short)]
+        id: Option<i64>,
 
         /// Restore all files in a batch (directory snapshot)
         #[arg(long)]
@@ -75,13 +75,12 @@ enum Command {
 
     /// Set or update a snapshot's label
     Label {
-        /// Snapshot ID (omit if using --batch)
-        #[arg(required_unless_present = "batch")]
-        id: Option<i64>,
-
         /// New label text
-        #[arg(required = true)]
         new_label: String,
+
+        /// Snapshot ID
+        #[arg(long, short)]
+        id: Option<i64>,
 
         /// Apply label to all snapshots in a batch
         #[arg(long)]
@@ -95,6 +94,21 @@ enum Command {
 
         /// Second snapshot ID
         id2: i64,
+    },
+
+    /// Delete a snapshot or batch
+    Delete {
+        /// Snapshot ID to delete
+        #[arg(long, short)]
+        id: Option<i64>,
+
+        /// Delete all snapshots in a batch
+        #[arg(long)]
+        batch: Option<String>,
+
+        /// Actually perform deletion (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
     },
 }
 
@@ -159,7 +173,7 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
-            let total = dsv::total_logical_bytes(&cli.store).unwrap_or(0);
+            let total: u64 = snaps.iter().map(|s| s.file_size).sum();
             println!(
                 "{:<6} {:<28} {:<16} {:<12} {:<14} Label",
                 "ID", "Created", "Hash prefix", "Size", "Batch"
@@ -189,7 +203,7 @@ fn main() -> Result<()> {
             );
         }
 
-        Command::Restore { id, out, batch } => {
+        Command::Restore { out, id, batch } => {
             if let Some(batch_id) = batch {
                 let count = dsv::restore_batch(&cli.store, &batch_id, &out)
                     .with_context(|| format!("Failed to restore batch {batch_id}"))?;
@@ -197,12 +211,13 @@ fn main() -> Result<()> {
                     "Restored {count} file(s) from batch {batch_id} → {}",
                     out.display()
                 );
-            } else {
-                let id = id.unwrap();
+            } else if let Some(id) = id {
                 dsv::restore(&cli.store, id, &out).with_context(|| {
                     format!("Failed to restore snapshot #{id} to {}", out.display())
                 })?;
                 println!("Restored snapshot #{id} → {}", out.display());
+            } else {
+                anyhow::bail!("Must specify either --id <ID> or --batch <BATCH_ID>");
             }
         }
 
@@ -244,8 +259,8 @@ fn main() -> Result<()> {
         }
 
         Command::Label {
-            id,
             new_label,
+            id,
             batch,
         } => {
             if let Some(batch_id) = batch {
@@ -254,11 +269,12 @@ fn main() -> Result<()> {
                 println!(
                     "Updated label to \"{new_label}\" on {count} snapshot(s) in batch {batch_id}"
                 );
-            } else {
-                let id = id.unwrap();
+            } else if let Some(id) = id {
                 dsv::update_label(&cli.store, id, &new_label)
                     .with_context(|| format!("Failed to update label for snapshot #{id}"))?;
                 println!("Snapshot #{id}: label set to \"{new_label}\"");
+            } else {
+                anyhow::bail!("Must specify either --id <ID> or --batch <BATCH_ID>");
             }
         }
 
@@ -319,6 +335,58 @@ fn main() -> Result<()> {
                     "Content: DIFFERENT — {sign}{} ({pct})",
                     format_bytes(report.size_delta_bytes.unsigned_abs())
                 );
+            }
+        }
+
+        Command::Delete { id, batch, confirm } => {
+            if !confirm {
+                println!("Dry-run mode. Use --confirm to actually delete.");
+            }
+            
+            if let Some(batch_id) = batch {
+                if confirm {
+                    let report = dsv::delete_batch(&cli.store, &batch_id)
+                        .with_context(|| format!("Failed to delete batch {batch_id}"))?;
+                    println!(
+                        "Deleted {} snapshot(s) and {} blob(s) ({} freed)",
+                        report.snapshots_deleted,
+                        report.blobs_deleted,
+                        format_bytes(report.bytes_freed)
+                    );
+                } else {
+                    let snaps = dsv::list_by_batch(&cli.store, &batch_id)
+                        .with_context(|| format!("Failed to list batch {batch_id}"))?;
+                    println!(
+                        "Would delete {} snapshot(s) in batch {}",
+                        snaps.len(),
+                        &batch_id[..8.min(batch_id.len())]
+                    );
+                    for snap in &snaps {
+                        println!("  #{} {} ({})", snap.id, snap.file_path, format_bytes(snap.file_size));
+                    }
+                }
+            } else if let Some(id) = id {
+                if confirm {
+                    let report = dsv::delete_snapshot(&cli.store, id)
+                        .with_context(|| format!("Failed to delete snapshot #{id}"))?;
+                    println!(
+                        "Deleted snapshot #{} and {} blob(s) ({} freed)",
+                        id,
+                        report.blobs_deleted,
+                        format_bytes(report.bytes_freed)
+                    );
+                } else {
+                    let snap = dsv::get_snapshot(&cli.store, id)
+                        .with_context(|| format!("Failed to get snapshot #{id}"))?;
+                    println!(
+                        "Would delete snapshot #{} {} ({})",
+                        id,
+                        snap.file_path,
+                        format_bytes(snap.file_size)
+                    );
+                }
+            } else {
+                anyhow::bail!("Must specify either --id <ID> or --batch <BATCH_ID>");
             }
         }
     }

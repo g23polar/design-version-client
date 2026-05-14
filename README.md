@@ -64,6 +64,13 @@ dsv --store /Volumes/ExternalSSD/design-snapshots init
 dsv --store /Volumes/ExternalSSD/design-snapshots snapshot big-file.psb
 ```
 
+## Documentation
+
+- **[User Guide](docs/USER-GUIDE.md)** — Complete walkthrough for non-technical users
+- **[Architecture](UML.md)** — Technical overview, module map, and data flows
+- **[Context](CONTEXT.md)** — Domain background and design decisions
+- **[ADRs](docs/adr/)** — Architecture decision records
+
 ## CLI Reference
 
 | Command | Description |

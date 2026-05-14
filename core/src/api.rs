@@ -211,6 +211,18 @@ pub fn list_by_file(store_root: &Path, pattern: &str) -> Result<Vec<Snapshot>> {
     manifest::list_snapshots_by_file(&conn, project.id, pattern)
 }
 
+/// List all snapshots in a specific batch.
+pub fn list_by_batch(store_root: &Path, batch_id: &str) -> Result<Vec<Snapshot>> {
+    let conn = manifest::open(&manifest_path(store_root))?;
+    manifest::list_snapshots_by_batch(&conn, batch_id)
+}
+
+/// Get a specific snapshot by ID.
+pub fn get_snapshot(store_root: &Path, snapshot_id: i64) -> Result<Snapshot> {
+    let conn = manifest::open(&manifest_path(store_root))?;
+    manifest::get_snapshot(&conn, snapshot_id)
+}
+
 // -- label --------------------------------------------------------------------
 
 /// Update the label on a single snapshot.
@@ -475,6 +487,88 @@ fn find_orphaned_blobs(store_root: &Path) -> Result<(Vec<String>, HashSet<String
     }
 
     Ok((orphaned, referenced))
+}
+
+// -- Delete operations -----------------------------------------------------
+
+/// Report from delete operations.
+#[derive(Debug, Clone)]
+pub struct DeleteReport {
+    pub snapshots_deleted: u64,
+    pub blobs_deleted: u64,
+    pub bytes_freed: u64,
+}
+
+/// Delete a specific snapshot and clean up orphaned blobs.
+pub fn delete_snapshot(store_root: &Path, snapshot_id: i64) -> Result<DeleteReport> {
+    let conn = manifest::open(&manifest_path(store_root))?;
+    
+    // Get snapshot info before deletion for reporting
+    let snapshot = manifest::get_snapshot(&conn, snapshot_id)?;
+    let blob_hash = snapshot.blob_hash.clone();
+    
+    // Delete snapshot from manifest
+    manifest::delete_snapshot(&conn, snapshot_id)?;
+    
+    // Check if the blob is now orphaned and delete it if so
+    let (conn, project) = open_project(store_root)?;
+    let referenced = manifest::referenced_hashes(&conn, project.id)?;
+    
+    let mut bytes_freed = 0;
+    let blobs_deleted = if !referenced.contains(&blob_hash) {
+        // Blob is orphaned, delete it
+        if let Ok(Some(size)) = cas::blob_size(store_root, &blob_hash) {
+            bytes_freed = size;
+        }
+        cas::delete_blob(store_root, &blob_hash)?;
+        1
+    } else {
+        0
+    };
+    
+    Ok(DeleteReport {
+        snapshots_deleted: 1,
+        blobs_deleted,
+        bytes_freed,
+    })
+}
+
+/// Delete all snapshots in a batch and clean up orphaned blobs.
+pub fn delete_batch(store_root: &Path, batch_id: &str) -> Result<DeleteReport> {
+    let conn = manifest::open(&manifest_path(store_root))?;
+    
+    // Get all snapshots in the batch before deletion
+    let snapshots = manifest::list_snapshots_by_batch(&conn, batch_id)?;
+    let blob_hashes: Vec<String> = snapshots.iter().map(|s| s.blob_hash.clone()).collect();
+    let _snapshot_count = snapshots.len() as u64;
+    
+    // Delete all snapshots in the batch
+    let deleted_count = manifest::delete_snapshots_by_batch(&conn, batch_id)?;
+    
+    // Check which blobs are now orphaned
+    let (conn, project) = open_project(store_root)?;
+    let referenced = manifest::referenced_hashes(&conn, project.id)?;
+    
+    let mut bytes_freed = 0;
+    let mut blobs_deleted = 0;
+    
+    for blob_hash in blob_hashes {
+        if !referenced.contains(&blob_hash) {
+            // Blob is orphaned, delete it
+            if let Ok(Some(size)) = cas::blob_size(store_root, &blob_hash) {
+                bytes_freed += size;
+            }
+            if cas::delete_blob(store_root, &blob_hash).is_ok() {
+                blobs_deleted += 1;
+            }
+        }
+    }
+    
+    Ok(DeleteReport {
+        snapshots_deleted: deleted_count,
+        blobs_deleted,
+        bytes_freed,
+    })
 }
 
 // -- Total storage helper -----------------------------------------------------

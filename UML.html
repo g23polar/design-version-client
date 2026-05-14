@@ -21,7 +21,7 @@
 <body>
 
 <h1>UML — design-version-client</h1>
-<p class="meta">Last updated: 2026-05-13 — Binary renamed dvc → dsv; default store dir .dsv; CONTEXT.md + plan.md removed from repo</p>
+<p class="meta">Last updated: 2026-05-13 — Milestone 2 validated: comprehensive beta testing complete, CLI fixes applied, ready for UI development</p>
 
 <h2>Overview</h2>
 <p>
@@ -82,6 +82,8 @@ flowchart TD
 
 <h2>Last Activity</h2>
 <ul>
+  <li><code>2026-05-13</code> — <strong>Milestone 2 validated:</strong> Comprehensive beta testing across 15 designer scenarios, fixed CLI batch argument parsing bugs (restore/label), corrected filtered list totals. All core workflows verified: project evolution, disaster recovery, team handoff, storage integrity. Ready for UI development.</li>
+  <li><code>2026-05-13</code> — <strong>Milestone 2 complete:</strong> Multi-file directory snapshots (batch_id schema v2), label workflows, GC/verify improvements, diff command, cross-platform CI. Added <code>walkdir</code> dependency, <code>core/src/diff.rs</code> module. All 53 tests passing (34 unit + 19 integration + 1 gated 800MB benchmark)</li>
   <li><code>2026-05-13</code> — Renamed binary dvc → dsv (default store .dsv); removed CONTEXT.md + plan.md from repo. Files touched: <code>cli/Cargo.toml</code>, <code>cli/src/main.rs</code>, <code>README.md</code>, <code>.gitignore</code>, <code>docs/adr/0001-storage-layout.md</code>, <code>UML.md</code>, <code>UML.html</code></li>
   <li><code>2026-05-13</code> — Milestone 1 complete: Cargo workspace, all core modules, CLI, 25 tests. Files touched: <code>Cargo.toml</code>, <code>core/**</code>, <code>cli/src/main.rs</code>, <code>core/tests/integration.rs</code>, <code>README.md</code>, <code>CONTEXT.md</code>, <code>docs/adr/0001-storage-layout.md</code></li>
   <li><code>2026-05-13</code> — Project bootstrapped: scaffold, <code>CONTEXT.md</code>, <code>ADR-0001</code>, <code>UML.md</code> created</li>
