@@ -77,7 +77,12 @@ const app = {
   // -- Render summary -------------------------------------------------------
   renderSummary(data) {
     const el = document.getElementById('summary');
+    const files = this.uniqueFiles(data.snapshots);
     el.innerHTML = `
+      <div class="stat">
+        <div class="stat-value">${files}</div>
+        <div class="stat-label">Files</div>
+      </div>
       <div class="stat">
         <div class="stat-value">${data.count}</div>
         <div class="stat-label">Snapshots</div>
@@ -85,10 +90,6 @@ const app = {
       <div class="stat">
         <div class="stat-value">${this.formatBytes(data.total_bytes)}</div>
         <div class="stat-label">Total Size</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">${this.uniqueFiles(data.snapshots)}</div>
-        <div class="stat-label">Unique Files</div>
       </div>
       <div class="stat">
         <div class="stat-value">${this.uniqueBatches(data.snapshots)}</div>
@@ -105,8 +106,43 @@ const app = {
     return new Set(snaps.filter(s => s.batch_id).map(s => s.batch_id)).size;
   },
 
+  // -- Group snapshots by file_path ----------------------------------------
+  groupByFile(snapshots) {
+    const map = new Map();
+    for (const s of snapshots) {
+      if (!map.has(s.file_path)) map.set(s.file_path, []);
+      map.get(s.file_path).push(s);
+    }
+    // Sort each group by created_at descending (latest first)
+    for (const [, snaps] of map) {
+      snaps.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    }
+    return map;
+  },
+
+  // Track which groups are expanded
+  expandedGroups: new Set(),
+
+  toggleGroup(filePath) {
+    if (this.expandedGroups.has(filePath)) {
+      this.expandedGroups.delete(filePath);
+    } else {
+      this.expandedGroups.add(filePath);
+    }
+    this.renderCurrentData();
+  },
+
+  // Cache current data for re-renders without refetching
+  _currentSnapshots: [],
+
   // -- Render table ---------------------------------------------------------
   renderTable(snapshots) {
+    this._currentSnapshots = snapshots;
+    this.renderCurrentData();
+  },
+
+  renderCurrentData() {
+    const snapshots = this._currentSnapshots;
     const body = document.getElementById('snapshot-body');
     const empty = document.getElementById('empty-state');
     const table = document.getElementById('snapshot-table');
@@ -120,30 +156,64 @@ const app = {
     table.classList.remove('hidden');
     empty.classList.add('hidden');
 
-    body.innerHTML = snapshots.map(s => `
-      <tr id="row-${s.id}" class="${this.diffFromId ? 'diff-selectable' : ''}">
-        <td class="col-id">${s.id}</td>
-        <td class="col-file"><span class="file-path">${this.escHtml(s.file_path)}</span></td>
-        <td class="col-size" style="text-align:right">${this.formatBytes(s.file_size)}</td>
-        <td class="col-hash"><span class="hash-text" title="${this.escHtml(s.blob_hash)}">${s.blob_hash.substring(0, 16)}…</span></td>
-        <td class="col-label">
-          <div class="label-display" id="label-${s.id}">
-            <span class="label-text" onclick="app.startEditLabel(${s.id}, '${this.escAttr(s.label || '')}')">${s.label ? this.escHtml(s.label) : '<span class=muted>—</span>'}</span>
-            <button class="btn-icon" onclick="app.startEditLabel(${s.id}, '${this.escAttr(s.label || '')}')" title="Edit label">✎</button>
-          </div>
-        </td>
-        <td class="col-batch"><span class="batch-text">${s.batch_id ? s.batch_id.substring(0, 8) + '…' : '—'}</span></td>
-        <td class="col-date">${this.formatDate(s.created_at)}</td>
-        <td class="col-actions">
-          ${this.diffFromId
-            ? `<button class="btn btn-small btn-accent" onclick="app.completeDiff(${s.id})">Compare</button>`
-            : `<button class="btn-icon" onclick="app.startDiff(${s.id})" title="Diff">⇔</button>
-               <button class="btn-icon" onclick="app.verifySingle(${s.id})" title="Verify">✓</button>
-               <button class="btn-icon" onclick="app.confirmDelete(${s.id})" title="Delete" style="color:var(--danger)">✕</button>`
-          }
-        </td>
-      </tr>
-    `).join('');
+    const groups = this.groupByFile(snapshots);
+    let html = '';
+
+    for (const [filePath, snaps] of groups) {
+      const latest = snaps[0];
+      const isExpanded = this.expandedGroups.has(filePath);
+      const count = snaps.length;
+      const uniqueHashes = new Set(snaps.map(s => s.blob_hash)).size;
+      const escapedPath = this.escAttr(filePath);
+
+      // Group header row
+      html += `
+        <tr class="group-row ${isExpanded ? 'expanded' : ''}" onclick="app.toggleGroup('${escapedPath}')">
+          <td class="col-expand"><span class="expand-icon">▶</span></td>
+          <td class="col-file"><span class="file-path">${this.escHtml(filePath)}</span></td>
+          <td class="col-versions"><span class="version-count ${count === 1 ? 'single' : ''}">${count}${uniqueHashes < count ? ` <span style="font-weight:400;font-size:var(--text-xs);opacity:0.7">(${uniqueHashes} unique)</span>` : ''}</span></td>
+          <td class="col-size" style="text-align:right">${this.formatBytes(latest.file_size)}</td>
+          <td class="col-label">${latest.label ? this.escHtml(latest.label) : '<span class="muted">—</span>'}</td>
+          <td class="col-date">${this.formatDate(latest.created_at)}</td>
+          <td class="col-actions" onclick="event.stopPropagation()">
+            ${this.diffFromId
+              ? `<button class="btn btn-small btn-accent" onclick="app.completeDiff(${latest.id})">Compare</button>`
+              : `<button class="btn-icon" onclick="app.startDiff(${latest.id})" title="Diff latest">⇔</button>
+                 <button class="btn-icon" onclick="app.verifySingle(${latest.id})" title="Verify latest">✓</button>`
+            }
+          </td>
+        </tr>`;
+
+      // Child rows (visible when expanded)
+      if (isExpanded) {
+        for (const s of snaps) {
+          html += `
+            <tr class="child-row" id="row-${s.id}">
+              <td></td>
+              <td><span class="child-id">#${s.id}</span><span class="hash-text" title="${this.escHtml(s.blob_hash)}">${s.blob_hash.substring(0, 16)}…</span>${s.batch_id ? ` <span class="batch-text" title="${this.escHtml(s.batch_id)}">batch:${s.batch_id.substring(0, 8)}</span>` : ''}</td>
+              <td></td>
+              <td class="col-size" style="text-align:right">${this.formatBytes(s.file_size)}</td>
+              <td class="col-label">
+                <div class="label-display" id="label-${s.id}">
+                  <span class="label-text" onclick="event.stopPropagation();app.startEditLabel(${s.id}, '${this.escAttr(s.label || '')}')">${s.label ? this.escHtml(s.label) : '<span class=muted>—</span>'}</span>
+                  <button class="btn-icon" onclick="event.stopPropagation();app.startEditLabel(${s.id}, '${this.escAttr(s.label || '')}')" title="Edit label">✎</button>
+                </div>
+              </td>
+              <td class="col-date">${this.formatDate(s.created_at)}</td>
+              <td class="col-actions">
+                ${this.diffFromId
+                  ? `<button class="btn btn-small btn-accent" onclick="event.stopPropagation();app.completeDiff(${s.id})">Compare</button>`
+                  : `<button class="btn-icon" onclick="event.stopPropagation();app.startDiff(${s.id})" title="Diff">⇔</button>
+                     <button class="btn-icon" onclick="event.stopPropagation();app.verifySingle(${s.id})" title="Verify">✓</button>
+                     <button class="btn-icon" onclick="event.stopPropagation();app.confirmDelete(${s.id})" title="Delete" class="danger">✕</button>`
+                }
+              </td>
+            </tr>`;
+        }
+      }
+    }
+
+    body.innerHTML = html;
   },
 
   // -- Label editing --------------------------------------------------------
@@ -244,7 +314,7 @@ const app = {
           <td>${this.formatDate(report.right.created_at)}</td>
         </tr>
       </table>
-      <div style="margin-top:1rem; padding:0.75rem; border-radius:var(--radius-sm); background: var(--bg);">
+      <div class="diff-result">
         ${report.same_content
           ? '<span class="diff-identical">✓ Content is IDENTICAL</span>'
           : `<span class="diff-changed">✗ Content DIFFERENT — ${sign}${this.formatBytes(Math.abs(delta))} (${pct})</span>`
@@ -262,13 +332,13 @@ const app = {
       const body = document.getElementById('delete-body');
       body.innerHTML = `
         <p>Are you sure you want to delete this snapshot?</p>
-        <table class="diff-table" style="margin-top:0.75rem;">
+        <table class="diff-table" style="margin-top:var(--space-3);">
           <tr><td class="diff-label">ID</td><td>#${snap.id}</td></tr>
           <tr><td class="diff-label">File</td><td>${this.escHtml(snap.file_path)}</td></tr>
           <tr><td class="diff-label">Size</td><td>${this.formatBytes(snap.file_size)}</td></tr>
           <tr><td class="diff-label">Label</td><td>${snap.label || '—'}</td></tr>
         </table>
-        <p style="margin-top:0.75rem; color:var(--danger); font-size:0.85rem;">This action cannot be undone.</p>
+        <p style="margin-top:var(--space-3); color:var(--color-danger); font-size:var(--text-sm); font-weight:600;">This action cannot be undone.</p>
       `;
       const btn = document.getElementById('delete-confirm-btn');
       btn.onclick = () => this.executeDelete(id);
@@ -317,16 +387,16 @@ const app = {
     const body = document.getElementById('verify-body');
     const allOk = report.corrupt.length === 0 && report.missing.length === 0;
     body.innerHTML = `
-      <div style="margin-bottom:1rem;">
+      <div style="margin-bottom:var(--space-4);">
         <p>Checked <strong>${report.checked}</strong> blob(s): <strong>${report.ok}</strong> OK</p>
-        ${report.corrupt.length > 0 ? `<p style="color:var(--danger);">${report.corrupt.length} corrupt</p>` : ''}
-        ${report.missing.length > 0 ? `<p style="color:var(--warning);">${report.missing.length} missing</p>` : ''}
+        ${report.corrupt.length > 0 ? `<p style="color:var(--color-danger); font-weight:600;">${report.corrupt.length} corrupt</p>` : ''}
+        ${report.missing.length > 0 ? `<p style="color:var(--color-warning); font-weight:600;">${report.missing.length} missing</p>` : ''}
       </div>
       ${allOk
-        ? '<div class="diff-identical" style="font-size:1.1rem;">✓ All blobs OK</div>'
+        ? '<div class="diff-identical" style="font-size:var(--text-lg);">✓ All blobs OK</div>'
         : `<div>
-            ${report.corrupt.map(h => `<div style="color:var(--danger); font-family:monospace; font-size:0.8rem;">CORRUPT: ${h}</div>`).join('')}
-            ${report.missing.map(h => `<div style="color:var(--warning); font-family:monospace; font-size:0.8rem;">MISSING: ${h}</div>`).join('')}
+            ${report.corrupt.map(h => `<div style="color:var(--color-danger); font-family:var(--font-mono); font-size:var(--text-xs);">CORRUPT: ${h}</div>`).join('')}
+            ${report.missing.map(h => `<div style="color:var(--color-warning); font-family:var(--font-mono); font-size:var(--text-xs);">MISSING: ${h}</div>`).join('')}
            </div>`
       }
     `;
